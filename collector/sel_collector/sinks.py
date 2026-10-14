@@ -10,6 +10,7 @@
 from __future__ import annotations
 
 import json
+import threading
 from abc import ABC, abstractmethod
 from pathlib import Path
 
@@ -29,11 +30,18 @@ class ConsoleSink(Sink):
 
 
 class FileSink(Sink):
+    """JSONL 落盘。多个数据源并行写同一文件时，_write_lock 保证行写原子性"""
+
+    _write_lock = threading.Lock()
+
     def __init__(self, path: str | Path) -> None:
         self._fp = open(path, "a", encoding="utf-8")
 
     def write(self, product: Product) -> None:
-        self._fp.write(json.dumps(product.to_kafka(), ensure_ascii=False) + "\n")
+        line = json.dumps(product.to_kafka(), ensure_ascii=False) + "\n"
+        with self._write_lock:
+            self._fp.write(line)
+            self._fp.flush()
 
     def close(self) -> None:
         self._fp.close()

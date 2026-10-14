@@ -81,11 +81,14 @@ sources:
   #       price: price
   #       sales: sales
 
-  # ---- 电商市场爬虫示例（需按目标站点配置 selector，见 SEL-24）----
+  # ---- 电商市场爬虫（SEL-24 规则已用 data/market_demo.html 本地验证通过）----
+  # selector 语法: "@data-id" 取卡片属性; "css@attr" 取子元素属性; 其余取文本
+  # 数值清洗: "¥1,299.00"→1299.0; "已售 1.2万+"→12000; "评价 8000+"→8000
+  # 上线时替换 list_url 为目标站点 URL，并按真实 DOM 调整 card/fields
   # - source: crawler
   #   interval_sec: 600
   #   config:
-  #     platform: market_a
+  #     platform: market
   #     list_url: "https://example.com/hot"
   #     requests_per_sec: 1
   #     list:
@@ -94,8 +97,10 @@ sources:
   #       max_pages: 10
   #       card: "li.product"
   #       fields:
-  #         product_id: "a[data-id]"
-  #         title: ".title"
-  #         price: ".price"
-  #         sales: ".sales"
-  #         review_count: ".reviews"
+  #         product_id: "@data-id"
+  #         title: ".p-title a"
+  #         price: ".p-price .cur"
+  #         original_price: ".p-price del"
+  #         sales: ".p-sales"
+  #         review_count: ".p-reviews"
+  #         review_score: ".p-score"

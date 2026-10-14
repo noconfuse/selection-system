@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import logging
 import random
+import re
 import time
 from typing import Iterable
 from urllib.parse import urlencode
@@ -107,6 +108,9 @@ class CrawlerAdapter(DataSourceAdapter):
             timeout=self.config.get("timeout", 15),
         )
         resp.raise_for_status()
+        # 部分站点 Content-Type 不声明 charset，requests 会按 latin-1 误读中文编码
+        if not resp.encoding or resp.encoding.lower() == "iso-8859-1":
+            resp.encoding = resp.apparent_encoding or "utf-8"
         return resp.text
 
     # ---- 字段提取 ----
@@ -119,42 +123,59 @@ class CrawlerAdapter(DataSourceAdapter):
         return field
 
     def _extract(self, card, soup, list_cfg: dict) -> Product | None:
-        """从单个商品卡片提取字段；selector 既可在 card 内也可回退到整页"""
+        """从单个商品卡片提取字段。
+        `@attr` 取卡片自身属性（如 `@data-id`），`css@attr` 取子元素属性，否则取文本。
+        卡片内缺失的字段保持缺失（不回退整页，避免跨卡片串数据）。"""
         raw: dict = {}
         for src_field, sel in list_cfg.get("fields", {}).items():
-            els = card.select(sel)
+            if sel.startswith("@"):
+                raw[src_field] = (card.get(sel[1:]) or "").strip()
+                continue
+            els = card.select(self._css(sel))
             if els:
-                raw[src_field] = els[0].get_text(strip=True)
-            else:
-                els = soup.select(sel)
-                if els:
-                    raw[src_field] = els[0].get_text(strip=True)
+                raw[src_field] = self._extract_value(els[0], sel)
         if "product_id" not in raw or not raw["product_id"]:
             return None
         raw.setdefault("title", raw.get("product_id"))
         return self._to_product(self._platform(), raw)
 
+    @staticmethod
+    def _css(sel: str) -> str:
+        """剥离 @attr 后缀得到纯 CSS selector"""
+        return sel.split("@", 1)[0] if "@" in sel else sel
+
+    @staticmethod
+    def _extract_value(el, sel: str) -> str:
+        """按 selector 提取：<css>@<attr> 取属性，否则取 strip 后的文本"""
+        if "@" in sel:
+            attr = sel.split("@", 1)[1]
+            return (el.get(attr) or "").strip()
+        return el.get_text(strip=True)
+
     def _extract_from_soup(self, soup, list_cfg: dict) -> dict:
         raw: dict = {}
         for src_field, sel in list_cfg.get("fields", {}).items():
-            els = soup.select(sel)
+            els = soup.select(self._css(sel))
             if els:
-                raw[src_field] = els[0].get_text(strip=True)
+                raw[src_field] = self._extract_value(els[0], sel)
         # 列表页没有卡片时的降级: 无字段即无结果
         return raw
 
     def _to_product(self, platform: str, raw: dict) -> Product:
         mapped = self._map(raw)
         mapped.setdefault("category", "unknown")
-        # 数值清洗: 价格/销量/评价
+        # 数值清洗: 价格/销量/评价（优先从源值清洗，field_map 直通时也需覆盖）
         price_src = self._src("price")
-        if "price" not in mapped and price_src in raw:
+        if price_src in raw:
             mapped["price"] = clean_price(raw[price_src])
+        origin_src = self._src("original_price")
+        if origin_src in raw and raw[origin_src]:
+            mapped["original_price"] = clean_price(raw[origin_src])
         sales_src = self._src("sales")
-        if "sales" not in mapped and sales_src in raw:
+        if sales_src in raw:
             mapped["sales"] = self._parse_count(raw[sales_src])
         review_src = self._src("review_count")
-        if "review_count" not in mapped and review_src in raw:
+        if review_src in raw:
             mapped["review_count"] = self._parse_count(raw[review_src])
         if not mapped.get("price"):
             mapped["price"] = 0.0
@@ -162,17 +183,20 @@ class CrawlerAdapter(DataSourceAdapter):
 
     @staticmethod
     def _parse_count(value) -> int:
-        """销量/评价数清洗: '1.2万' / '5000+' -> 整数"""
+        """销量/评价数清洗: '已售 1.2万+' / '评价 8000+' / '3,500' -> 整数"""
         s = str(value).replace(",", "").strip()
+        m = re.search(r"\d+(?:\.\d+)?", s)  # 前缀文案（"已售""评价"）只取首个数字
+        if not m:
+            return 0
+        num = m.group()
         mul = 1
-        if "万" in s:
+        tail = s[m.end():]
+        if "万" in tail or tail.startswith("万"):
             mul = 10_000
-            s = s.split("万")[0]
-        elif "亿" in s:
+        elif "亿" in tail or tail.startswith("亿"):
             mul = 100_000_000
-            s = s.split("亿")[0]
         try:
-            return int(float(s) * mul)
+            return int(float(num) * mul)
         except (TypeError, ValueError):
             return 0
 

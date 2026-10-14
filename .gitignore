@@ -11,6 +11,7 @@ build/
 data/*
 !data/public_demo.csv
 !data/own_demo.csv
+!data/market_demo.html
 *.jsonl
 *.log
 

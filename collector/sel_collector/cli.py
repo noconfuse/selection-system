@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import logging
 import sys
+import threading
 
 import yaml
 
@@ -27,6 +28,7 @@ def run(config_path: str, once: bool = False) -> int:
 
     failed = False
     global_cfg = cfg.get("collector", {}) if cfg.get("collector") else cfg
+    threads: list[threading.Thread] = []
     for entry in sources:
         name = entry["source"]
         adapter = build_adapter(name, entry.get("config"))
@@ -49,7 +51,11 @@ def run(config_path: str, once: bool = False) -> int:
                 failed = True
         else:
             print(f"[{name}] 开始循环采集, 每 {entry.get('interval_sec', 300)}s 一轮")
-            loop.run_forever()
+            t = threading.Thread(target=loop.run_forever, name=f"source-{name}", daemon=True)
+            threads.append(t)
+            t.start()
+    for t in threads:
+        t.join()  # run_forever 内为无限循环，靠外部信号/SIGINT 终止
     return 1 if failed else 0
 
 
