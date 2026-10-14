@@ -1,0 +1,101 @@
+# 采集器配置（SEL-22 公开数据源接入）
+# 数据源类型: public（公开开放接口/数据集）、own（自有数据）、crawler（电商市场爬虫）
+
+collector:
+  sink: file                 # console | file（file 供管道对接前先落盘）
+  sink_config:
+    path: data/products.jsonl
+
+sources:
+  # ---- 公开数据源 1: 本地公开数据集（CSV，离线可复跑）----
+  - source: public
+    interval_sec: 300
+    config:
+      platform: open_market
+      file_path: data/public_demo.csv
+      field_map:
+        product_id: product_id
+        title: title
+        category: category
+        price: price
+        original_price: original_price
+        sales: sales
+        review_count: review_count
+        review_score: review_score
+        listed_at: listed_at
+
+  # ---- 公开数据源 2: 真实开放接口（FakeStore API，免费无需授权）----
+  # 返回 [{id,title,price,category,description,image,rating:{rate,count}}]
+  # rating 为嵌套对象，当前 field_map 仅支持顶层字段（SEL-24 前不解析嵌套）
+  - source: public
+    interval_sec: 300
+    config:
+      platform: fakestore
+      api_url: "https://fakestoreapi.com/products"
+      list_key: ""            # 返回的是数组，无需 list_key
+      field_map:
+        id: product_id
+        title: title
+        category: category
+        price: price
+
+  # ---- 自有数据源 1: 自有平台/店铺文件导入（CSV/JSON/JSONL，历史数据一次性导入）----
+  - source: own
+    interval_sec: 300
+    config:
+      platform: own_shop
+      file_path: data/own_demo.csv
+      field_map:
+        product_id: product_id
+        title: title
+        category: category
+        price: price
+        sales: sales
+        review_count: review_count
+        listed_at: listed_at
+
+  # ---- 自有数据源 2: 自有后端接口增量同步（api_url 二选一，与 file_path 互斥）----
+  # 接口返回商品列表数组或 {list_key: [...]}
+  # - source: own
+  #   interval_sec: 300
+  #   config:
+  #     platform: own_shop
+  #     api_url: "https://api.example.com/v1/products"
+  #     list_key: items
+  #     field_map:
+  #       product_id: product_id
+  #       title: title
+  #       price: price
+  #       sales: sales
+
+  # ---- 公开数据源 3: 真实开放数据集文件（JSONL，mock 脱敏示例）----
+  # 若后续获得授权开放数据，直接换成真实 JSONL 即可
+  # - source: public
+  #   interval_sec: 600
+  #   config:
+  #     platform: open_dataset
+  #     file_path: data/real_dataset.jsonl
+  #     field_map:
+  #       product_id: product_id
+  #       title: title
+  #       price: price
+  #       sales: sales
+
+  # ---- 电商市场爬虫示例（需按目标站点配置 selector，见 SEL-24）----
+  # - source: crawler
+  #   interval_sec: 600
+  #   config:
+  #     platform: market_a
+  #     list_url: "https://example.com/hot"
+  #     requests_per_sec: 1
+  #     list:
+  #       page_param: "page"
+  #       pages: 1
+  #       max_pages: 10
+  #       card: "li.product"
+  #       fields:
+  #         product_id: "a[data-id]"
+  #         title: ".title"
+  #         price: ".price"
+  #         sales: ".sales"
+  #         review_count: ".reviews"
